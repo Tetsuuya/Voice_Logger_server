@@ -1,15 +1,15 @@
 services:
-  - type: worker          # Background Worker — never sleeps, runs 24/7
+  - type: web               # Web Service — has free tier on Render
     name: voice-logger-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python voice_logger_bot.py
     envVars:
       - key: TELEGRAM_TOKEN
-        sync: false       # Set manually in Render dashboard
+        sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: SPREADSHEET_ID
         sync: false
       - key: CREDENTIALS_JSON
-        sync: false       # Paste the full contents of your .json credentials file here
+        sync: false         # Paste full contents of your .json credentials file

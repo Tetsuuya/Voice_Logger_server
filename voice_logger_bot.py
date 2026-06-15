@@ -21,6 +21,8 @@ import logging
 import tempfile
 import datetime
 import asyncio
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from collections import defaultdict
 
 from telegram import Update, ReplyKeyboardRemove, BotCommand
@@ -468,6 +470,32 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
     )
 
+# ── HEALTH CHECK SERVER (keeps Render Web Service awake) ─────────────────────
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK - VoiceLogger is running")
+
+    def log_message(self, *args):
+        pass  # silence access logs
+
+
+def start_health_server():
+    """Start a tiny HTTP server in a background thread.
+
+    Render Web Service requires an open port to consider the service healthy.
+    UptimeRobot pings /health every 14 min to prevent free-tier sleep.
+    """
+    port = int(os.getenv("PORT", 8000))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    log.info(f"Health-check server running on port {port} ✓")
+
+
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
 async def post_init(app):
@@ -485,6 +513,7 @@ async def post_init(app):
 
 def main():
     log.info("Starting VoiceLogger bot…")
+    start_health_server()  # keep Render Web Service awake
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     # Conversation handler for sheet setup (/start and /setsheet)
