@@ -1,0 +1,39 @@
+# ── Secrets & Credentials ─────────────────────────────────────────────────────
+.env
+*.json
+!requirements*.json
+
+# ── User Data ─────────────────────────────────────────────────────────────────
+user_prefs.json
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual Environment ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Temp / Audio Files ────────────────────────────────────────────────────────
+*.ogg
+*.mp3
+*.wav
+*.tmp
+
+# ── OS & Editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
