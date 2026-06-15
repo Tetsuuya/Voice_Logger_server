@@ -16,10 +16,12 @@ Usage:
 import os
 import re
 import json
+import time
 import logging
 import tempfile
 import datetime
 import asyncio
+from collections import defaultdict
 
 from telegram import Update, ReplyKeyboardRemove, BotCommand
 from telegram.ext import (
@@ -54,6 +56,48 @@ USER_PREFS_FILE   = os.path.join(os.path.dirname(__file__), "user_prefs.json")
 
 # Conversation states
 WAITING_FOR_SHEET = 1
+
+# ── RATE LIMITING ─────────────────────────────────────────────────────────────
+# Per-user: 15 seconds cooldown between voice notes, max 20 per hour
+
+RATE_COOLDOWN_SECONDS = 15
+RATE_HOURLY_LIMIT     = 20
+
+_last_request: dict[int, float]       = {}          # user_id → timestamp
+_hourly_log:   dict[int, list[float]] = defaultdict(list)  # user_id → [timestamps]
+
+
+def check_rate_limit(user_id: int) -> tuple[bool, str]:
+    """Returns (is_allowed, reason_message)."""
+    now = time.monotonic()
+
+    # Cooldown check
+    last = _last_request.get(user_id)
+    if last is not None:
+        elapsed = now - last
+        if elapsed < RATE_COOLDOWN_SECONDS:
+            wait = int(RATE_COOLDOWN_SECONDS - elapsed) + 1
+            return False, (
+                f"⏳ *Slow down!* Please wait *{wait}s* before sending another voice note."
+            )
+
+    # Hourly cap — prune old entries first
+    hour_ago = now - 3600
+    _hourly_log[user_id] = [t for t in _hourly_log[user_id] if t > hour_ago]
+    if len(_hourly_log[user_id]) >= RATE_HOURLY_LIMIT:
+        return False, (
+            f"⚠️ You've hit the limit of *{RATE_HOURLY_LIMIT} voice notes per hour*. "
+            "Try again later."
+        )
+
+    return True, ""
+
+
+def record_request(user_id: int):
+    """Record a successful request for rate-limit tracking."""
+    now = time.monotonic()
+    _last_request[user_id] = now
+    _hourly_log[user_id].append(now)
 
 # ── LOGGING ───────────────────────────────────────────────────────────────────
 
@@ -116,7 +160,13 @@ def _gspread_client():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
-    creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
+    # Prefer inline JSON (for Render / cloud deployments where file upload isn't available)
+    creds_json_str = os.getenv("CREDENTIALS_JSON")
+    if creds_json_str:
+        creds_data = json.loads(creds_json_str)
+        creds = Credentials.from_service_account_info(creds_data, scopes=scopes)
+    else:
+        creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
     return gspread.authorize(creds)
 
 
@@ -334,12 +384,21 @@ async def cmd_mysheet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg    = update.message
     user   = msg.from_user
+    user_id = user.id
     sender = (
         f"{user.first_name} {user.last_name or ''}".strip()
         + (f" (@{user.username})" if user.username else "")
     )
     voice    = msg.voice
     duration = voice.duration
+
+    # ── Rate limit check ──────────────────────────────────────────────────────
+    allowed, reason = check_rate_limit(user_id)
+    if not allowed:
+        await msg.reply_text(reason, parse_mode="Markdown")
+        return
+    record_request(user_id)
+    # ─────────────────────────────────────────────────────────────────────────
 
     await msg.reply_text("🎙️ Got it — transcribing…")
 
